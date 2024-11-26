@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 import { banUser, getUserBlockList, handleDcfLogin } from "./twitchApi.js";
 
 await handleDcfLogin(async () => {
