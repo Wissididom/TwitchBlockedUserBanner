@@ -112,7 +112,7 @@ async function getUser() {
   return (
     await fetch("https://api.twitch.tv/helix/users", {
       headers: {
-        "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
+        "Client-ID": Deno.env.get("TWITCH_CLIENT_ID") ?? "N/A",
         Authorization: `Bearer ${tokens.access_token}`,
       },
     }).then((res) => res.json())
@@ -132,7 +132,7 @@ async function refresh() {
     {
       method: "POST",
       headers: {
-        "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
+        "Client-ID": Deno.env.get("TWITCH_CLIENT_ID") ?? "N/A",
         Authorization: `Bearer ${tokens.access_token}`,
       },
     },
@@ -161,7 +161,7 @@ async function validate() {
   return await fetch("https://id.twitch.tv/oauth2/validate", {
     method: "GET",
     headers: {
-      "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
+      "Client-ID": Deno.env.get("TWITCH_CLIENT_ID") ?? "N/A",
       Authorization: `Bearer ${tokens.access_token}`,
     },
   }).then(async (res) => {
@@ -186,11 +186,18 @@ async function validate() {
   });
 }
 
-async function getUserBlockList(broadcasterId, maxEntries = 500) {
-  const result = {
+async function getUserBlockList(
+  broadcasterId?: string,
+  maxEntries: number = 500,
+) {
+  const result: {
+    total: number;
+    blocks: any[];
+  } = {
     total: 0,
     blocks: [],
   };
+  if (!broadcasterId) return result;
   let paginationCursor = null;
   while (result.total < maxEntries) {
     const tempUserBlockList = await internalGetUserBlockList(
@@ -198,7 +205,7 @@ async function getUserBlockList(broadcasterId, maxEntries = 500) {
       paginationCursor,
     );
     // Don't continue when there is no pagination cursor returned by Twitch
-    if (!tempUserBlockList.paginationCursor) break;
+    if (!tempUserBlockList?.paginationCursor) break;
     paginationCursor = tempUserBlockList.paginationCursor;
     result.blocks = [...result.blocks, ...tempUserBlockList.blocks];
     result.total = result.blocks.length;
@@ -207,8 +214,8 @@ async function getUserBlockList(broadcasterId, maxEntries = 500) {
 }
 
 async function internalGetUserBlockList(
-  broadcasterId,
-  paginationCursor = null,
+  broadcasterId: string,
+  paginationCursor: string | null = null,
 ) {
   let apiUrl;
   if (paginationCursor) {
@@ -221,7 +228,7 @@ async function internalGetUserBlockList(
   const res = await fetch(apiUrl, {
     method: "GET",
     headers: {
-      "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
+      "Client-ID": Deno.env.get("TWITCH_CLIENT_ID") ?? "N/A",
       Authorization: `Bearer ${tokens.access_token}`,
       "Content-Type": "application/json",
     },
@@ -231,7 +238,7 @@ async function internalGetUserBlockList(
     console.log("Status 401");
     const refreshed = await refresh();
     if (!refreshed) throw new Error("Token refresh failed");
-    return await getUserBlockList(broadcasterId, maxEntries, paginationCursor);
+    return await internalGetUserBlockList(broadcasterId, paginationCursor);
   }
   if (!res.ok) {
     console.log(`!res.ok: ${res.status}`);
@@ -252,13 +259,23 @@ async function internalGetUserBlockList(
   }
 }
 
-async function banUser(broadcasterId, moderatorId, userId, reason) {
+async function banUser(
+  broadcasterId?: string,
+  moderatorId?: string,
+  userId?: string,
+  reason?: string,
+) {
+  if (!broadcasterId || !moderatorId || !userId) {
+    throw new Error(
+      "At least broadcasterId, moderatorId and userId must be given for banning a user!",
+    );
+  }
   const res = await fetch(
     `https://api.twitch.tv/helix/moderation/bans?broadcaster_id=${broadcasterId}&moderator_id=${moderatorId}`,
     {
       method: "POST",
       headers: {
-        "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
+        "Client-ID": Deno.env.get("TWITCH_CLIENT_ID") ?? "N/A",
         Authorization: `Bearer ${tokens.access_token}`,
         "Content-Type": "application/json",
       },
@@ -285,7 +302,9 @@ async function banUser(broadcasterId, moderatorId, userId, reason) {
     throw new Error(`Error: ${json.error}; Error-Message: ${json.message}`);
   } else {
     if (json.data.length < 1) {
-      throw new Error(strings.poll["notcreated"]);
+      throw new Error(
+        "twitch didn't return ban info. I assume, the ban was silently dropped.",
+      );
     }
     return json.data[0];
   }
