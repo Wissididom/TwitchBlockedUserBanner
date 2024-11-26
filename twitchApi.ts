@@ -1,6 +1,14 @@
-import * as fs from "fs";
+// deno-lint-ignore-file no-explicit-any
+import { fileExists } from "./utils.ts";
 
-let tokens = {
+let tokens: {
+  access_token?: string | null;
+  refresh_token?: string | null;
+  device_code?: string | null;
+  user_code?: string | null;
+  verification_uri?: string | null;
+  user_id?: string | null;
+} = {
   access_token: null,
   refresh_token: null,
   device_code: null,
@@ -9,7 +17,7 @@ let tokens = {
   user_id: null,
 };
 
-function getStatusResponse(res, json) {
+function getStatusResponse(res: Response, json: any) {
   switch (res.status) {
     case 200:
       return `OK: ${json.message}`;
@@ -35,21 +43,21 @@ const SCOPES = [
   "moderator:manage:banned_users",
 ].join(" ");
 
-async function handleDcfLogin(authenticatedCallback) {
-  if (fs.existsSync("./.tokens.json")) {
+async function handleDcfLogin(authenticatedCallback: () => any) {
+  if (await fileExists("./.tokens.json")) {
     tokens = JSON.parse(
-      fs.readFileSync("./.tokens.json", { encoding: "utf8", flag: "r" }),
+      await Deno.readTextFile("./.tokens.json"),
     );
-    let validated = await validate();
+    const validated = await validate();
     if (validated) {
       console.log("Validated tokens and started bot");
       await authenticatedCallback();
       return;
     }
   }
-  let dcf = await fetch(
+  const dcf = await fetch(
     `https://id.twitch.tv/oauth2/device?client_id=${
-      process.env.TWITCH_CLIENT_ID
+      Deno.env.get("TWITCH_CLIENT_ID")
     }&scopes=${encodeURIComponent(SCOPES)}`,
     {
       method: "POST",
@@ -57,7 +65,7 @@ async function handleDcfLogin(authenticatedCallback) {
   );
   if (dcf.status >= 200 && dcf.status < 300) {
     // Successfully got DCF data
-    let dcfJson = await dcf.json();
+    const dcfJson = await dcf.json();
     tokens.device_code = dcfJson.device_code;
     tokens.user_code = dcfJson.user_code;
     tokens.verification_uri = dcfJson.verification_uri;
@@ -65,13 +73,13 @@ async function handleDcfLogin(authenticatedCallback) {
       `Open ${tokens.verification_uri} in a browser and enter ${tokens.user_code} there!`,
     );
   }
-  let dcfInterval = setInterval(async () => {
-    let tokenPair = await fetch(
+  const dcfInterval = setInterval(async () => {
+    const tokenPair = await fetch(
       `https://id.twitch.tv/oauth2/token?client_id=${
-        process.env.TWITCH_CLIENT_ID
-      }&scopes=${encodeURIComponent(SCOPES)}&device_code=${
-        tokens.device_code
-      }&grant_type=urn:ietf:params:oauth:grant-type:device_code`,
+        Deno.env.get("TWITCH_CLIENT_ID")
+      }&scopes=${
+        encodeURIComponent(SCOPES)
+      }&device_code=${tokens.device_code}&grant_type=urn:ietf:params:oauth:grant-type:device_code`,
       {
         method: "POST",
       },
@@ -79,14 +87,12 @@ async function handleDcfLogin(authenticatedCallback) {
     if (tokenPair.status == 400) return; // Probably authorization pending
     if (tokenPair.status >= 200 && tokenPair.status < 300) {
       // Successfully got token pair
-      let tokenJson = await tokenPair.json();
+      const tokenJson = await tokenPair.json();
       tokens.access_token = tokenJson.access_token;
       tokens.refresh_token = tokenJson.refresh_token;
-      let user = await getUser();
+      const user = await getUser();
       tokens.user_id = user.id;
-      fs.writeFileSync("./.tokens.json", JSON.stringify(tokens), {
-        encoding: "utf8",
-      });
+      await Deno.writeTextFile("./.tokens.json", JSON.stringify(tokens));
       clearInterval(dcfInterval);
       console.log(
         `Got Device Code Flow Tokens for ${user.display_name} (${user.login}) and started bot`,
@@ -96,7 +102,7 @@ async function handleDcfLogin(authenticatedCallback) {
         async () => {
           await validate();
         },
-        60 * 60 * 1000 /*Run every hour*/,
+        60 * 60 * 1000, /*Run every hour*/
       );
     }
   }, 1000);
@@ -106,7 +112,7 @@ async function getUser() {
   return (
     await fetch("https://api.twitch.tv/helix/users", {
       headers: {
-        "Client-ID": process.env.TWITCH_CLIENT_ID,
+        "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
         Authorization: `Bearer ${tokens.access_token}`,
       },
     }).then((res) => res.json())
@@ -115,30 +121,30 @@ async function getUser() {
 
 async function refresh() {
   console.log("Refreshing tokens...");
-  let refreshResult = await fetch(
-    `https://id.twitch.tv/oauth2/token?grant_type=refresh_token&refresh_token=${encodeURIComponent(
-      tokens.refresh_token,
-    )}&client_id=${process.env.TWITCH_CLIENT_ID}&client_secret=${
-      process.env.TWITCH_CLIENT_SECRET
+  const refreshResult = await fetch(
+    `https://id.twitch.tv/oauth2/token?grant_type=refresh_token&refresh_token=${
+      encodeURIComponent(
+        tokens.refresh_token ?? "N/A",
+      )
+    }&client_id=${Deno.env.get("TWITCH_CLIENT_ID")}&client_secret=${
+      Deno.env.get("TWITCH_CLIENT_SECRET")
     }`,
     {
       method: "POST",
       headers: {
-        "Client-ID": process.env.TWITCH_CLIENT_ID,
+        "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
         Authorization: `Bearer ${tokens.access_token}`,
       },
     },
   );
-  let refreshJson = await refreshResult.json();
+  const refreshJson = await refreshResult.json();
   if (refreshResult.status >= 200 && refreshResult.status < 300) {
     // Successfully refreshed
     tokens.access_token = refreshJson.access_token;
     tokens.refresh_token = refreshJson.refresh_token;
-    let user = await getUser();
+    const user = await getUser();
     tokens.user_id = user.id;
-    fs.writeFileSync("./.tokens.json", JSON.stringify(tokens), {
-      encoding: "utf8",
-    });
+    await Deno.writeTextFile("./.tokens.json", JSON.stringify(tokens));
     console.log("Successfully refreshed tokens!");
     return true;
   } else {
@@ -150,12 +156,12 @@ async function refresh() {
 
 async function validate() {
   tokens = JSON.parse(
-    fs.readFileSync(".tokens.json", { encoding: "utf8", flag: "r" }),
+    await Deno.readTextFile(".tokens.json"),
   );
   return await fetch("https://id.twitch.tv/oauth2/validate", {
     method: "GET",
     headers: {
-      "Client-ID": process.env.TWITCH_CLIENT_ID,
+      "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
       Authorization: `Bearer ${tokens.access_token}`,
     },
   }).then(async (res) => {
@@ -181,13 +187,13 @@ async function validate() {
 }
 
 async function getUserBlockList(broadcasterId, maxEntries = 500) {
-  let result = {
+  const result = {
     total: 0,
     blocks: [],
   };
   let paginationCursor = null;
-  while (result.total < 500) {
-    let tempUserBlockList = await internalGetUserBlockList(
+  while (result.total < maxEntries) {
+    const tempUserBlockList = await internalGetUserBlockList(
       broadcasterId,
       paginationCursor,
     );
@@ -206,14 +212,16 @@ async function internalGetUserBlockList(
 ) {
   let apiUrl;
   if (paginationCursor) {
-    apiUrl = `https://api.twitch.tv/helix/users/blocks?broadcaster_id=${broadcasterId}&first=100&after=${paginationCursor}`;
+    apiUrl =
+      `https://api.twitch.tv/helix/users/blocks?broadcaster_id=${broadcasterId}&first=100&after=${paginationCursor}`;
   } else {
-    apiUrl = `https://api.twitch.tv/helix/users/blocks?broadcaster_id=${broadcasterId}&first=100`;
+    apiUrl =
+      `https://api.twitch.tv/helix/users/blocks?broadcaster_id=${broadcasterId}&first=100`;
   }
   const res = await fetch(apiUrl, {
     method: "GET",
     headers: {
-      "Client-ID": process.env.TWITCH_CLIENT_ID,
+      "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
       Authorization: `Bearer ${tokens.access_token}`,
       "Content-Type": "application/json",
     },
@@ -221,7 +229,7 @@ async function internalGetUserBlockList(
   const json = await res.json();
   if (res.status == 401) {
     console.log("Status 401");
-    let refreshed = await refresh();
+    const refreshed = await refresh();
     if (!refreshed) throw new Error("Token refresh failed");
     return await getUserBlockList(broadcasterId, maxEntries, paginationCursor);
   }
@@ -250,7 +258,7 @@ async function banUser(broadcasterId, moderatorId, userId, reason) {
     {
       method: "POST",
       headers: {
-        "Client-ID": process.env.TWITCH_CLIENT_ID,
+        "Client-ID": Deno.env.get("TWITCH_CLIENT_ID"),
         Authorization: `Bearer ${tokens.access_token}`,
         "Content-Type": "application/json",
       },
@@ -265,7 +273,7 @@ async function banUser(broadcasterId, moderatorId, userId, reason) {
   );
   const json = await res.json();
   if (res.status == 401) {
-    let refreshed = await refresh();
+    const refreshed = await refresh();
     if (refreshed) {
       return await banUser(broadcasterId, moderatorId, userId, reason);
     }
@@ -283,4 +291,4 @@ async function banUser(broadcasterId, moderatorId, userId, reason) {
   }
 }
 
-export { handleDcfLogin, getUser, getUserBlockList, banUser, refresh };
+export { banUser, getUser, getUserBlockList, handleDcfLogin, refresh };
