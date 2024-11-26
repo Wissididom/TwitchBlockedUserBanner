@@ -1,4 +1,4 @@
-import { banUser, getUserBlockList, handleDcfLogin } from "./twitchApi.js";
+import { banUser, getUserBlockList, handleDcfLogin } from "./twitchApi.ts";
 
 await handleDcfLogin(async () => {
   const blocks = await getUserBlockList(Deno.env.get("BROADCASTER_ID"));
